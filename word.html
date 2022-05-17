@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          rows="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>Title</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: auto;
+            font-family: sans-serif;
+            font-size: 11.0pt;
+        }
+        table td {
+            vertical-align: top;
+        }
+    </style>
+</head>
+<body>
+
+
+<script type="text/javascript" src="//unpkg.com/xlsx/dist/shim.min.js"></script>
+<script type="text/javascript" src="//unpkg.com/jquery"></script>
+<script type="text/javascript" src="//unpkg.com/xlsx"></script>
+<script>
+    const util = {
+        loading: function () {
+            $("body").append("<div class='loading-mask' style='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.1);z-index:99999999'></div>")
+        },
+        loadend: function () {
+            $(".loading-mask").remove();
+        },
+        getUrlValue: function (part, key) {
+            const query = window.location[part || "search"].substring(1);
+            const vars = query.split("&");
+            for (let i = 0; i < vars.length; i++) {
+                const pair = vars[i].split("=");
+                if (pair[0] === key) return pair[1] || '';
+            }
+            return '';
+        }
+    };
+</script>
+<script>
+    (async () => {
+        const url = util.getUrlValue("", "path") || "";
+        util.loading();
+        fetch(url).then(res => res.blob())
+            .then(blob => {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const html = $(reader.result, document.implementation.createHTMLDocument('virtual'));
+                    const seps = html.filter(":contains('==========')");
+                    const body = seps.eq(0).prev().nextUntil(seps.eq(1));
+                    const bookInfoText = seps.eq(0).prevAll().text().replace(/\s/g, "");
+                    let bookInfoMatch = bookInfoText.match(/\d{4}年\d{1,2}月第.版/g) || [];
+                    if(bookInfoMatch.length > 0) {
+                        bookInfoMatch = bookInfoMatch.pop();
+                        bookInfoMatch = bookInfoMatch.match(/(\d{4})年\d{1,2}月(第.版)/);
+                    }
+                    const info = {};
+                    info["来源"] = (decodeURIComponent(url).match(/\d{8}-\d{8}-(.+)\//) || [])[1];
+                    info["版本"] = bookInfoMatch[2];
+                    info["年份"] = bookInfoMatch[1];
+                    const subjectRootValue = info["来源"].split("名词")[0];
+                    let subjectList = [subjectRootValue];
+                    const data = [];
+                    let errorLine = [];
+
+                    const rows = body.find("p");
+                    for (let i = 0; i < rows.length; i++) {
+                        const textArray = $(rows[i]).text().trim().replace(/ \n/, "  ").replace(/­/g, "").replace(/[\r\n]/g, " ").split(/  |　|  +|  /);
+                        if (/^[\d.]+$/.test(textArray[0])) {
+                            if (!/^\d{2}\.\d{3,6}$/.test(textArray[0])) {
+                                const thisSubject = textArray;
+                                const thisSubjectNumber = thisSubject.shift();
+                                const thisSubjectText = thisSubject.join("").replace(/\s/g, "")
+                                const thisSubjectLevel = thisSubjectNumber.split(/\../).length;
+                                
+                                while(thisSubjectLevel <= subjectList.length  ) {
+                                    subjectList.pop();
+                                }
+                                subjectList.push(thisSubjectText);
+                                    
+                            } else {
+                                let desc = $(rows[++i]).text().replace(/[\r\n]/g, "").trim();
+                                while (($(rows[i + 1]).text().trim() === "" || !/^[\d.]{3,10}/.test($(rows[i + 1]).text().trim())) && i <= rows.length) {
+                                    desc += $(rows[++i]).text().replace(/[\r\n]/g, "").trim();
+                                }
+                                let descMatch = desc.match(/^(([全简又俗曾]称)([^。]+。))?(.+)$/);
+                                desc = descMatch[4];
+                                let names = {}, tempName = "";
+                                if (descMatch[2]) {
+                                    names[tempName = descMatch[2]] = descMatch[3].replace(/^“|”。$/g, "").replace(/” ?“/g, "；")
+                                    if (names[tempName].search(/，([全简又俗曾]称)/) > 0) {
+                                        descMatch = names[tempName].match(/(.*?)，([全简又俗曾]称)([^。]+)$/);
+                                        names[tempName] = descMatch[1].replace(/^“|”$/g, "")
+                                        names[tempName = descMatch[2]] = descMatch[3].replace(/^“|”$/g, "").replace(/” ?“/g, "；")
+                                    }
+                                }
+                                const line = {};
+                                line["学科"] = subjectRootValue + "_" + subjectList.join("_");
+                                line["序号"] = textArray[0].trim();
+                                line["规范用词"] = textArray[1].trim();
+                                line["英文"] = (textArray[2] || "").replace(/, ?/g, "；").trim();// 检查异常替换
+                                line["定义"] = desc;
+                                data.push($.extend(line, names, info))
+                            }
+                        } else {
+                            const line = $(rows[i]).text().trim();
+                            if (line !== "" && line !== "==========") errorLine.push(line);
+                        }
+                    }
+
+                    const filename = info["来源"] + ".xlsx";
+                    const ws_name = "SheetJS";
+
+                    if (typeof console !== 'undefined') console.log(new Date());
+                    const wb = XLSX.utils.book_new();
+                    const ws = XLSX.utils.json_to_sheet(data, {header: ["序号", "学科", "规范用词", "英文", "全称", "简称", "又称", "俗称", "曾称", "其他语种", "定义", "来源", "版本", "年份"]});
+                    ws['!cols'] = [
+                        {wch: 12},
+                        {wch: 37},
+                        {wch: 16},
+                        {wch: 39},
+                        {wch: 48},
+                        {wch: 19},
+                        {wch: 19},
+                        {wch: 19},
+                        {wch: 19},
+                        {wch: 39},
+                        {wch: 25},
+                        {wch: 19},
+                        {wch: 19},
+                        {wch: 8}
+                    ];
+                    ws["A1"].s = {alignment: {vertical: "center"}, fill: {bgColor: {rgb: "ffffcc"}}};
+                    ws["A2"].s = {alignment: {vertical: "center"}, fill: {bgColor: {rgb: "ffffcc"}}};
+
+                    const num = seps.eq(0).prevAll().text().match(/共(\d{3,5})条/g)[0];
+                    if (errorLine.length > 0) {
+                        const ol = $("<ol></ol>");
+                        errorLine.forEach(function (line) {
+                            ol.append(`<li style="color:red">${line}</li>`)
+                        })
+                        errorLine = `<p style="color:red">异常内容：</p>` + ol[0].outerHTML
+                    }
+
+                    $("body").append(`<p>本术语名词内 ${num}，其中 ${body.find("img").length} 张图片，${body.find("sup").length} 个上标，${body.find("sub").length} 个下标。</p>`)
+                        .append(`<p ${num !== '共' + data.length + '条' ? 'style="color: red"' : ''}>现格式化数据 共${data.length}条</p>`)
+                        .append(errorLine)
+                        .append($("<button>").text("download xlsx").click(function () {
+                            XLSX.utils.book_append_sheet(wb, ws, ws_name);
+                            XLSX.writeFile(wb, filename);
+                        }))
+                        .append(XLSX.utils.sheet_to_html(ws));
+
+                }
+                reader.readAsText(blob, 'GBK')
+            })
+        util.loadend();
+    })();
+
+</script>
+
+</body>
+</html>

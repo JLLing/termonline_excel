@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="mytemplate">
+  <p>%test%</p>
+  <p>%word%</p>
+</div>
+<div id="my">
+</div>
+
+<script>
+    document.getElementById("my").innerHTML=template("mytemplate",{test:"MYTEST",word:"MYWORD"});
+    function template( templateid, data ){
+        return document.getElementById( templateid ).innerHTML
+            .replace(
+                /%(\w*)%/g, // or /{(\w*)}/g for "{this} instead of %this%"
+                function( m, key ){
+                    return data.hasOwnProperty( key ) ? data[ key ] : "";
+                }
+            );
+    }
+</script>
+</body>
+</html>
